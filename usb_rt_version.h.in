@@ -1,0 +1,6 @@
+#ifndef USB_RT_VERSION_H
+#define USB_RT_VERSION_H
+
+#define USB_RT_VERSION_STRING "${VERSION}"
+
+#endif

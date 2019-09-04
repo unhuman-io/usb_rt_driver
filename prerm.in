@@ -1,0 +1,3 @@
+#!/bin/bash
+
+dkms remove -m usb_rt -v ${VERSION} --all
