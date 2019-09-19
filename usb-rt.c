@@ -233,6 +233,7 @@ __poll_t usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 	ongoing_io = dev->ongoing_read;
 	spin_unlock_irq(&dev->err_lock);
 	if(ongoing_io) {
+		poll_wait(file, &dev->bulk_in_wait, wait);
 		return retval;
 	} else {
 		if (dev->bulk_in_filled - dev->bulk_in_copied) {
