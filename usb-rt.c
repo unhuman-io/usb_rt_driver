@@ -229,21 +229,23 @@ __poll_t usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 	__poll_t retval =  POLLWRNORM | POLLPRI | POLLOUT;	// can always write
 
 	dev = file->private_data;
+	poll_wait(file, &dev->bulk_in_wait, wait);
+
 	spin_lock_irq(&dev->err_lock);
 	ongoing_io = dev->ongoing_read;
 	spin_unlock_irq(&dev->err_lock);
 	if(ongoing_io) {
-		poll_wait(file, &dev->bulk_in_wait, wait);
-		return retval;
+		// only return default retval
 	} else {
 		if (dev->bulk_in_filled - dev->bulk_in_copied) {
-			return retval |  POLLRDNORM | POLLIN;
+			// data is available
+			retval |= POLLRDNORM | POLLIN;
 		} else {
+			// else poll then triggers a new read
 			usb_rt_do_read_io(dev, dev->bulk_in_size);
-			poll_wait(file, &dev->bulk_in_wait, wait);
-			return retval;
 		}
 	}
+	return retval;
 }
 
 static ssize_t usb_rt_read(struct file *file, char *buffer, size_t count,
