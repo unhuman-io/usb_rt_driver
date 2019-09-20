@@ -223,10 +223,10 @@ static int usb_rt_do_read_io(struct usb_rt *dev, size_t count)
 	return rv;
 }
 
-__poll_t usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
+unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 	struct usb_rt *dev;
 	bool ongoing_io;
-	__poll_t retval =  POLLWRNORM | POLLPRI | POLLOUT;	// can always write
+	unsigned int retval =  POLLWRNORM | POLLPRI | POLLOUT;	// can always write
 
 	dev = file->private_data;
 	poll_wait(file, &dev->bulk_in_wait, wait);
