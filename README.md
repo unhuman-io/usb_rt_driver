@@ -21,6 +21,14 @@ with dkms. The source is then built automatically using dkms when new kernel
 versions are installed. Additionally `99-usb_rt_driver.rules` is installed to 
 `/etc/udev/rules.d` to assist with permissions.
 
+### dkms
+If secure boot is enabled, dkms should ask you to set up a machine owner key. 
+You should say yes. It will also ask for a password The system will reboot. 
+After reboot a utility will open to generate the key. You will need a monitor 
+and keyboard connected at reboot. If you miss the chance to generate the key 
+at this point, I don’t know how to fix it, though the system still seems to 
+work, just with more warnings.
+
 ## driver
 This driver will create character devices to communicate with usb hardware. The 
 default dev name is `/dev/usbrt*`. Communication with the device is possible 

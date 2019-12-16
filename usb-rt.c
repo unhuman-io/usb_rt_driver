@@ -223,25 +223,29 @@ static int usb_rt_do_read_io(struct usb_rt *dev, size_t count)
 	return rv;
 }
 
-__poll_t usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
+unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 	struct usb_rt *dev;
 	bool ongoing_io;
+	unsigned int retval =  POLLWRNORM | POLLPRI | POLLOUT;	// can always write
 
 	dev = file->private_data;
+	poll_wait(file, &dev->bulk_in_wait, wait);
+
 	spin_lock_irq(&dev->err_lock);
 	ongoing_io = dev->ongoing_read;
 	spin_unlock_irq(&dev->err_lock);
 	if(ongoing_io) {
-		return 0;
+		// only return default retval
 	} else {
 		if (dev->bulk_in_filled - dev->bulk_in_copied) {
-			return POLLIN;
+			// data is available
+			retval |= POLLRDNORM | POLLIN;
 		} else {
+			// else poll then triggers a new read
 			usb_rt_do_read_io(dev, dev->bulk_in_size);
-			poll_wait(file, &dev->bulk_in_wait, wait);
-			return 0;
 		}
 	}
+	return retval;
 }
 
 static ssize_t usb_rt_read(struct file *file, char *buffer, size_t count,
