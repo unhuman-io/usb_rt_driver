@@ -26,8 +26,10 @@ MODULE_VERSION(USB_RT_VERSION_STRING);
 
 /* table of devices that work with this driver */
 static const struct usb_device_id usb_rt_table[] = {
-	{ USB_DEVICE(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID) },
-	{ USB_DEVICE(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID+1) },
+	{ USB_DEVICE_INTERFACE_NUMBER(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID, 0) },
+	{ USB_DEVICE_INTERFACE_NUMBER(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID+1, 0) },
+	{ USB_DEVICE_INTERFACE_NUMBER(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID, 1) },
+	{ USB_DEVICE_INTERFACE_NUMBER(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID+1, 1) },
 	{ }					/* Terminating entry */
 };
 MODULE_DEVICE_TABLE(usb, usb_rt_table);
@@ -517,6 +519,13 @@ static struct usb_class_driver usb_rt_class = {
 	.minor_base =	USB_RT_MINOR_BASE,
 };
 
+// Text interface for anything other than interface 0
+static struct usb_class_driver usb_rt_txt_class = {
+	.name =		"usbrttxt%d",
+	.fops =		&usb_rt_fops,
+	.minor_base =	USB_RT_MINOR_BASE,
+};
+
 // A specialized name for motors
 static struct usb_class_driver usb_mtr_class = {
 	.name =		"mtr%d",
@@ -530,6 +539,10 @@ static int usb_rt_probe(struct usb_interface *interface,
 	struct usb_rt *dev;
 	struct usb_endpoint_descriptor *bulk_in=NULL, *bulk_out=NULL;
 	int retval;
+
+	dev_info(&interface->dev,
+		 "USB RT device attempting connection on interface %d",
+		 interface->cur_altsetting->desc.bInterfaceNumber);
 
 	/* allocate memory for our device state and initialize it */
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
@@ -551,8 +564,7 @@ static int usb_rt_probe(struct usb_interface *interface,
 	   is the current convention */
 
 	retval = 0;
-	if (interface->cur_altsetting->desc.bInterfaceNumber == 0 &&
-		interface->cur_altsetting->desc.bNumEndpoints == 2 &&
+	if (interface->cur_altsetting->desc.bNumEndpoints == 2 &&
 		usb_endpoint_is_bulk_in(&interface->cur_altsetting->endpoint[0].desc) &&
 		usb_endpoint_is_bulk_out(&interface->cur_altsetting->endpoint[1].desc)) {
 		bulk_in = &interface->cur_altsetting->endpoint[0].desc;
@@ -585,13 +597,17 @@ static int usb_rt_probe(struct usb_interface *interface,
 	usb_set_intfdata(interface, dev);
 
 	/* we can register the device now, as it is ready */
-	switch (id->idProduct) {
-		case USB_RT_PRODUCT_ID+1:
-			retval = usb_register_dev(interface, &usb_mtr_class);
-			break;
-		default:
-			retval = usb_register_dev(interface, &usb_rt_class);
-			break;
+	if (interface->cur_altsetting->desc.bInterfaceNumber == 0) { // rt interface
+		switch (id->idProduct) {
+			case USB_RT_PRODUCT_ID+1:
+				retval = usb_register_dev(interface, &usb_mtr_class);
+				break;
+			default:
+				retval = usb_register_dev(interface, &usb_rt_class);
+				break;
+		}
+	} else { // txt interface
+		retval = usb_register_dev(interface, &usb_rt_txt_class);
 	}
 	if (retval) {
 		/* something prevented us from registering this driver */
