@@ -19,3 +19,4 @@ jobs:
       uses: actions/upload-artifact@v1
       with:
         name: usb_rt_driver-0.2.0-Linux.deb
+        path: .
