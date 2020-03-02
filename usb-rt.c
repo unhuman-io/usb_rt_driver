@@ -21,14 +21,13 @@
 
 MODULE_VERSION(USB_RT_VERSION_STRING);
 /* Define these values to match your devices */
-#define USB_RT_VENDOR_ID	0x0483
-#define USB_RT_PRODUCT_ID	0x5740
+#define UNHUMAN_VENDOR_ID	0x3293
+#define UNHUMAN_MTR_PRODUCT_ID	0x0100
 
 /* table of devices that work with this driver */
 static const struct usb_device_id usb_rt_table[] = {
-	{ USB_DEVICE_INTERFACE_NUMBER(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID, 0) },
-	{ USB_DEVICE_INTERFACE_NUMBER(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID+1, 0) },
-	{ }					/* Terminating entry */
+	{ USB_DEVICE_INTERFACE_NUMBER(UNHUMAN_VENDOR_ID, UNHUMAN_MTR_PRODUCT_ID, 0)},
+	{} 					/* Terminating entry */
 };
 MODULE_DEVICE_TABLE(usb, usb_rt_table);
 
