@@ -510,46 +510,44 @@ static ssize_t text_api_store(struct device *dev, struct device_attribute *attr,
 {
 	struct usb_interface *intf = to_usb_interface(dev);		
 	struct usb_rt *usb_rt = usb_get_intfdata(intf);	
+	int transfer_count = min(count, MAX_TRANSFER);
 	int count_sent = 0;
+	int retval;
+	char *buf2 = kmalloc(transfer_count, GFP_KERNEL);
+	if (!buf2)
+		return -ENOMEM;
+
+	memcpy(buf2, buf, transfer_count);	 // usb_bulk_msg doesn't want a pointer to const
+
 	/* do an immediate bulk read to get data from the device */
-	int retval = usb_bulk_msg (usb_rt->udev,
+	retval = usb_bulk_msg (usb_rt->udev,
 						usb_sndbulkpipe (usb_rt->udev,
 						0x01),
-						buf,
-						count,
+						buf2,
+						transfer_count,
 						&count_sent, HZ*10);
-	/* if the read was successful, copy the data to user space */
-	// if (!retval) {
-    //     if (copy_to_user (buffer, skel->bulk_in_buffer, count))
-    //             retval = -EFAULT;
-    //     else
-    //             retval = count;									
-
-	//usb_string(usb_rt->udev, 5, buf, PAGE_SIZE-1);
-	return count_sent;		
+	if (retval)
+		return retval;
+	else
+		return count_sent;		
 }
 
 static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, char *buf)		
 {
 	struct usb_interface *intf = to_usb_interface(dev);		
 	struct usb_rt *usb_rt = usb_get_intfdata(intf);	
-	int count = 0;
+	int count_received = 0;
 	/* do an immediate bulk read to get data from the device */
 	int retval = usb_bulk_msg (usb_rt->udev,
 						usb_rcvbulkpipe (usb_rt->udev,
 						0x81),
 						buf,
 						64,
-						&count, HZ*10);
-	/* if the read was successful, copy the data to user space */
-	// if (!retval) {
-    //     if (copy_to_user (buffer, skel->bulk_in_buffer, count))
-    //             retval = -EFAULT;
-    //     else
-    //             retval = count;									
-
-	//usb_string(usb_rt->udev, 5, buf, PAGE_SIZE-1);
-	return sprintf(buf, "%s\n", buf);		
+						&count_received, HZ);
+	if (retval)
+		return retval;
+	else
+		return count_received;		
 }
 struct device_attribute dev_attr_text_api = __ATTR_RW(text_api);
 
