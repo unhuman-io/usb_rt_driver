@@ -21,14 +21,13 @@
 
 MODULE_VERSION(USB_RT_VERSION_STRING);
 /* Define these values to match your devices */
-#define USB_RT_VENDOR_ID	0x0483
-#define USB_RT_PRODUCT_ID	0x5740
+#define UNHUMAN_VENDOR_ID	0x3293
+#define UNHUMAN_MTR_PRODUCT_ID	0x0100
 
 /* table of devices that work with this driver */
 static const struct usb_device_id usb_rt_table[] = {
-	{ USB_DEVICE(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID) },
-	{ USB_DEVICE(USB_RT_VENDOR_ID, USB_RT_PRODUCT_ID+1) },
-	{ }					/* Terminating entry */
+	{ USB_DEVICE_INTERFACE_NUMBER(UNHUMAN_VENDOR_ID, UNHUMAN_MTR_PRODUCT_ID, 0)},
+	{} 					/* Terminating entry */
 };
 MODULE_DEVICE_TABLE(usb, usb_rt_table);
 
@@ -63,6 +62,7 @@ struct usb_rt {
 	struct kref		kref;
 	struct mutex		io_mutex;		/* synchronize I/O with disconnect */
 	wait_queue_head_t	bulk_in_wait;		/* to wait for an ongoing read */
+	bool 			has_text_api;
 };
 #define to_usb_rt_dev(d) container_of(d, struct usb_rt, kref)
 
@@ -506,6 +506,51 @@ static const struct file_operations usb_rt_fops = {
 	.poll = 	usb_rt_poll,
 };
 
+static ssize_t text_api_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)		
+{
+	struct usb_interface *intf = to_usb_interface(dev);		
+	struct usb_rt *usb_rt = usb_get_intfdata(intf);	
+	int transfer_count = min(count, MAX_TRANSFER);
+	int count_sent = 0;
+	int retval;
+	char *buf2 = kmalloc(transfer_count, GFP_KERNEL);
+	if (!buf2)
+		return -ENOMEM;
+
+	memcpy(buf2, buf, transfer_count);	 // usb_bulk_msg doesn't want a pointer to const
+
+	/* do an immediate bulk read to get data from the device */
+	retval = usb_bulk_msg (usb_rt->udev,
+						usb_sndbulkpipe (usb_rt->udev,
+						0x01),
+						buf2,
+						transfer_count,
+						&count_sent, HZ*10);
+	if (retval)
+		return retval;
+	else
+		return count_sent;		
+}
+
+static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, char *buf)		
+{
+	struct usb_interface *intf = to_usb_interface(dev);		
+	struct usb_rt *usb_rt = usb_get_intfdata(intf);	
+	int count_received = 0;
+	/* do an immediate bulk read to get data from the device */
+	int retval = usb_bulk_msg (usb_rt->udev,
+						usb_rcvbulkpipe (usb_rt->udev,
+						0x81),
+						buf,
+						64,
+						&count_received, HZ);
+	if (retval)
+		return retval;
+	else
+		return count_received;		
+}
+struct device_attribute dev_attr_text_api = __ATTR_RW(text_api);
+
 /*
  * usb class driver info in order to get a minor number from the usb core,
  * and to have the device registered with the driver core
@@ -552,11 +597,20 @@ static int usb_rt_probe(struct usb_interface *interface,
 
 	retval = 0;
 	if (interface->cur_altsetting->desc.bInterfaceNumber == 0 &&
-		interface->cur_altsetting->desc.bNumEndpoints == 2 &&
 		usb_endpoint_is_bulk_in(&interface->cur_altsetting->endpoint[0].desc) &&
 		usb_endpoint_is_bulk_out(&interface->cur_altsetting->endpoint[1].desc)) {
+		// realtime interface
 		bulk_in = &interface->cur_altsetting->endpoint[0].desc;
 		bulk_out = &interface->cur_altsetting->endpoint[1].desc;
+		if (interface->cur_altsetting->desc.bNumEndpoints == 4 &&
+			usb_endpoint_is_bulk_in(&interface->cur_altsetting->endpoint[2].desc) &&
+			usb_endpoint_is_bulk_out(&interface->cur_altsetting->endpoint[3].desc)) {
+			// text api interface
+			retval = device_create_file(&interface->dev, &dev_attr_text_api);
+			dev->has_text_api = true;
+			if (retval)
+				goto error;
+		}
 	} else {
 		retval = 1;
 	}
@@ -586,7 +640,7 @@ static int usb_rt_probe(struct usb_interface *interface,
 
 	/* we can register the device now, as it is ready */
 	switch (id->idProduct) {
-		case USB_RT_PRODUCT_ID+1:
+		case UNHUMAN_MTR_PRODUCT_ID:
 			retval = usb_register_dev(interface, &usb_mtr_class);
 			break;
 		default:
@@ -620,6 +674,8 @@ static void usb_rt_disconnect(struct usb_interface *interface)
 	int minor = interface->minor;
 
 	dev = usb_get_intfdata(interface);
+	if (dev->has_text_api == true)
+		device_remove_file(&interface->dev, &dev_attr_text_api);
 	usb_set_intfdata(interface, NULL);
 
 	/* give back our minor */

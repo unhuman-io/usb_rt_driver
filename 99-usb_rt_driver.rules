@@ -1,2 +1,3 @@
-KERNEL=="usbrt*", MODE="0777"
-KERNEL=="mtr*", MODE="0777"
+KERNEL=="usbrt*", MODE="0666"
+KERNEL=="mtr*", MODE="0666"
+SUBSYSTEMS=="usb", ATTR{idVendor}=="3293", ATTR{idProduct}=="0100", MODE="0666"
