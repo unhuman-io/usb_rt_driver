@@ -1,3 +1,4 @@
 KERNEL=="usbrt*", MODE="0666"
 KERNEL=="mtr*", MODE="0666"
 SUBSYSTEMS=="usb", ATTR{idVendor}=="3293", ATTR{idProduct}=="0100", MODE="0666"
+ACTION=="add", SUBSYSTEM=="usbmisc", KERNEL=="mtr*", RUN+="/bin/chmod a+w /sys/class/usbmisc/%k/device/text_api"
