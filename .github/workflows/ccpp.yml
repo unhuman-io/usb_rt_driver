@@ -4,13 +4,11 @@ on: [push]
 
 jobs:
   build:
-
     runs-on: ubuntu-16.04
-    
     steps:
     - uses: actions/checkout@v1
     - name: cmake
-      run: cmake .
+      run: cmake -DCMAKE_BUILD_TYPE=Release .
     - name: make
       run: make
     - name: make package
@@ -20,3 +18,30 @@ jobs:
       with:
         name: packages
         path: packages
+  build_arm:
+    runs-on: ubuntu-18.04
+    steps:
+    - uses: actions/checkout@v1
+    - uses: uraimo/run-on-arch-action@v2.0.5
+      name: Run commands
+      id: runcmd
+      with:
+        arch: aarch64
+        distro: ubuntu18.04
+        setup: |
+          mkdir -p "${PWD}/packages"
+        dockerRunArgs: |
+          --volume "${PWD}/packages:/packages"
+        run: |
+          cmake -DCMAKE_BUILD_TYPE=Release -DOS_VERSION=generic -DBUILD_MODULE=OFF .
+          make
+          make package
+        install: |
+          apt-get update -q -y
+          apt-get install -y cmake build-essential linux-headers-generic
+    - name: Archive production artifacts
+      uses: actions/upload-artifact@v1
+      with:
+        name: packages
+        path: packages
+
