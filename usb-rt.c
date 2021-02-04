@@ -138,6 +138,7 @@ static int usb_rt_release(struct inode *inode, struct file *file)
 static int usb_rt_flush(struct file *file, fl_owner_t id)
 {
 	struct usb_rt *dev;
+	unsigned long flags;
 	int res;
 
 	dev = file->private_data;
@@ -149,10 +150,10 @@ static int usb_rt_flush(struct file *file, fl_owner_t id)
 	usb_rt_draw_down(dev);
 
 	/* read out errors, leave subsequent opens a clean slate */
-	spin_lock_irq(&dev->err_lock);
+	spin_lock_irqsave(&dev->err_lock, flags);
 	res = dev->errors ? (dev->errors == -EPIPE ? -EPIPE : -EIO) : 0;
 	dev->errors = 0;
-	spin_unlock_irq(&dev->err_lock);
+	spin_unlock_irqrestore(&dev->err_lock, flags);
 
 	mutex_unlock(&dev->io_mutex);
 
@@ -189,6 +190,7 @@ static void usb_rt_read_bulk_callback(struct urb *urb)
 static int usb_rt_do_read_io(struct usb_rt *dev, size_t count)
 {
 	int rv;
+	unsigned long flags;
 
 	/* prepare a read */
 	usb_fill_bulk_urb(dev->bulk_in_urb,
@@ -200,9 +202,9 @@ static int usb_rt_do_read_io(struct usb_rt *dev, size_t count)
 			usb_rt_read_bulk_callback,
 			dev);
 	/* tell everybody to leave the URB alone */
-	spin_lock_irq(&dev->err_lock);
+	spin_lock_irqsave(&dev->err_lock, flags);
 	dev->ongoing_read = 1;
-	spin_unlock_irq(&dev->err_lock);
+	spin_unlock_irqrestore(&dev->err_lock, flags);
 
 	/* submit bulk in urb, which means no data to deliver */
 	dev->bulk_in_filled = 0;
@@ -215,9 +217,9 @@ static int usb_rt_do_read_io(struct usb_rt *dev, size_t count)
 			"%s - failed submitting read urb, error %d\n",
 			__func__, rv);
 		rv = (rv == -ENOMEM) ? rv : -EIO;
-		spin_lock_irq(&dev->err_lock);
+		spin_lock_irqsave(&dev->err_lock, flags);
 		dev->ongoing_read = 0;
-		spin_unlock_irq(&dev->err_lock);
+		spin_unlock_irqrestore(&dev->err_lock, flags);
 	}
 
 	return rv;
@@ -226,14 +228,22 @@ static int usb_rt_do_read_io(struct usb_rt *dev, size_t count)
 unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 	struct usb_rt *dev;
 	bool ongoing_io;
+	unsigned long flags;
 	unsigned int retval =  POLLWRNORM | POLLPRI | POLLOUT;	// can always write
+	int rv;
 
 	dev = file->private_data;
 	poll_wait(file, &dev->bulk_in_wait, wait);
 
-	spin_lock_irq(&dev->err_lock);
+	
+	rv = mutex_lock_interruptible(&dev->io_mutex);
+	if (rv) {
+		return rv;
+	}
+
+	spin_lock_irqsave(&dev->err_lock, flags);
 	ongoing_io = dev->ongoing_read;
-	spin_unlock_irq(&dev->err_lock);
+	spin_unlock_irqrestore(&dev->err_lock, flags);
 	if(ongoing_io) {
 		// only return default retval
 	} else {
@@ -241,10 +251,14 @@ unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 			// data is available
 			retval |= POLLRDNORM | POLLIN;
 		} else {
-			// else poll then triggers a new read
-			usb_rt_do_read_io(dev, dev->bulk_in_size);
+			// todo else poll maybe triggers a new read
+			rv = usb_rt_do_read_io(dev, dev->bulk_in_size);
+			if (rv) {
+				return rv;
+			}
 		}
 	}
+	mutex_unlock(&dev->io_mutex);
 	return retval;
 }
 
@@ -254,6 +268,7 @@ static ssize_t usb_rt_read(struct file *file, char *buffer, size_t count,
 	struct usb_rt *dev;
 	int rv;
 	bool ongoing_io;
+	unsigned long flags;
 
 	dev = file->private_data;
 
@@ -273,9 +288,9 @@ static ssize_t usb_rt_read(struct file *file, char *buffer, size_t count,
 
 	/* if IO is under way, we must not touch things */
 retry:
-	spin_lock_irq(&dev->err_lock);
+	spin_lock_irqsave(&dev->err_lock, flags);
 	ongoing_io = dev->ongoing_read;
-	spin_unlock_irq(&dev->err_lock);
+	spin_unlock_irqrestore(&dev->err_lock, flags);
 
 	if (ongoing_io) {
 		/* nonblocking IO shall not wait */
@@ -391,6 +406,7 @@ static ssize_t usb_rt_write(struct file *file, const char *user_buffer,
 	int retval = 0;
 	struct urb *urb = NULL;
 	char *buf = NULL;
+	unsigned long flags;
 	size_t writesize = min(count, (size_t)MAX_TRANSFER);
 
 	dev = file->private_data;
@@ -417,7 +433,7 @@ static ssize_t usb_rt_write(struct file *file, const char *user_buffer,
 		}
 	}
 
-	spin_lock_irq(&dev->err_lock);
+	spin_lock_irqsave(&dev->err_lock, flags);
 	retval = dev->errors;
 	if (retval < 0) {
 		/* any error is reported once */
@@ -425,7 +441,7 @@ static ssize_t usb_rt_write(struct file *file, const char *user_buffer,
 		/* to preserve notifications about reset */
 		retval = (retval == -EPIPE) ? retval : -EIO;
 	}
-	spin_unlock_irq(&dev->err_lock);
+	spin_unlock_irqrestore(&dev->err_lock, flags);
 	if (retval < 0)
 		goto error;
 

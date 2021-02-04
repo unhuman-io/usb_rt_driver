@@ -3,8 +3,9 @@ Linux driver for usb devices that supports high frequency communication. Based
 on usb-skeleton from the linux source with slight modifications for 
 asynchronous i/o.
 
-Uses cmake to build. Dependencies are cmake, linux-headers, and dkms. The 
-recommended install is to create a deb package and install it. 
+Uses cmake to build. Dependencies are cmake, linux-headers (e.g. 
+linux-headers-$(uname -r)), build-essential, and dkms. The recommended install 
+is to create a deb package and install it. 
 
 ## build
 ```console
