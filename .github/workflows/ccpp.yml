@@ -21,12 +21,15 @@ jobs:
   build_arm:
     runs-on: ubuntu-18.04
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: aarch64
             distro: ubuntu18.04
+            headers: linux-headers-generic
           - arch: armv6
             distro: buster
+            headers: raspberrypi-kernel-headers
     steps:
     - uses: actions/checkout@v1
     - uses: uraimo/run-on-arch-action@v2.0.5
@@ -45,7 +48,7 @@ jobs:
           make package
         install: |
           apt-get update -q -y
-          apt-get install -y cmake build-essential linux-headers-$(uname -r)
+          apt-get install -y cmake build-essential ${{ matrix.headers }}
     - name: Archive production artifacts
       uses: actions/upload-artifact@v1
       with:
