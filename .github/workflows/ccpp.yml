@@ -20,14 +20,21 @@ jobs:
         path: packages
   build_arm:
     runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            distro: ubuntu18.04
+          - arch: armv6
+            distro: buster
     steps:
     - uses: actions/checkout@v1
     - uses: uraimo/run-on-arch-action@v2.0.5
       name: Run commands
       id: runcmd
       with:
-        arch: aarch64
-        distro: ubuntu18.04
+        arch: ${{ matrix.arch }}
+        distro: ${{ matrix.distro }}
         setup: |
           mkdir -p "${PWD}/packages"
         dockerRunArgs: |
