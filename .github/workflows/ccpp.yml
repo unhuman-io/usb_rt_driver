@@ -38,6 +38,7 @@ jobs:
       with:
         arch: ${{ matrix.arch }}
         distro: ${{ matrix.distro }}
+        githubToken: ${{ github.token }}
         setup: |
           mkdir -p "${PWD}/packages"
         dockerRunArgs: |
