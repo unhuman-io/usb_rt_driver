@@ -302,9 +302,13 @@ retry:
 		 * IO may take forever
 		 * hence wait in an interruptible state
 		 */
-		rv = wait_event_interruptible(dev->bulk_in_wait, (!dev->ongoing_read));
-		if (rv < 0)
+		rv = wait_event_interruptible_timeout(dev->bulk_in_wait, (!dev->ongoing_read), msecs_to_jiffies(10));
+		if (rv <= 0) {
+			if (rv == 0) {
+				rv = -ETIMEDOUT;
+			}
 			goto exit;
+		}
 	}
 
 	/* errors must be reported */
@@ -535,7 +539,7 @@ static ssize_t text_api_store(struct device *dev, struct device_attribute *attr,
 
 	memcpy(buf2, buf, transfer_count);	 // usb_bulk_msg doesn't want a pointer to const
 
-	/* do an immediate bulk read to get data from the device */
+	/* do an immediate bulk write to the device */
 	retval = usb_bulk_msg (usb_rt->udev,
 						usb_sndbulkpipe (usb_rt->udev,
 						0x01),
@@ -559,7 +563,7 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 						0x81),
 						buf,
 						64,
-						&count_received, HZ);
+						&count_received, 1000);
 	if (retval)
 		return retval;
 	else
