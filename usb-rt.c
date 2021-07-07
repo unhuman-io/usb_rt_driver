@@ -302,9 +302,13 @@ retry:
 		 * IO may take forever
 		 * hence wait in an interruptible state
 		 */
-		rv = wait_event_interruptible(dev->bulk_in_wait, (!dev->ongoing_read));
-		if (rv < 0)
+		rv = wait_event_interruptible_timeout(dev->bulk_in_wait, (!dev->ongoing_read), msecs_to_jiffies(10));
+		if (rv <= 0) {
+			if (rv == 0) {
+				rv = -ETIMEDOUT;
+			}
 			goto exit;
+		}
 	}
 
 	/* errors must be reported */
