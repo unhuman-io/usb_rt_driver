@@ -562,8 +562,8 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 						usb_rcvbulkpipe (usb_rt->udev,
 						0x81),
 						buf,
-						64,
-						&count_received, 1000);
+						1000,
+						&count_received, 100);
 	if (retval)
 		return retval;
 	else
