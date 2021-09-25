@@ -719,10 +719,10 @@ static void usb_rt_disconnect(struct usb_interface *interface)
 	usb_kill_urb(dev->bulk_in_urb);
 	usb_kill_anchored_urbs(&dev->submitted);
 
+	dev_info(&interface->dev, "USB RT #%d disconnected", minor);
+
 	/* decrement our usage count */
 	kref_put(&dev->kref, usb_rt_delete);
-
-	dev_info(&interface->dev, "USB RT #%d now disconnected", minor);
 }
 
 static void usb_rt_draw_down(struct usb_rt *dev)
