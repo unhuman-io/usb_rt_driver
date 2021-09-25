@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * USB RT driver - 2.2
+ * USB RT driver based on USB Skeleton driver - 2.2
  *
  * Copyright (C) 2001-2004 Greg Kroah-Hartman (greg@kroah.com)
  *
@@ -37,9 +37,11 @@ MODULE_DEVICE_TABLE(usb, usb_rt_table);
 
 /* our private defines. if this grows any larger, use your own .h file */
 #define MAX_TRANSFER		(PAGE_SIZE - 512)
-/* MAX_TRANSFER is chosen so that the VM is not stressed by
-   allocations > PAGE_SIZE and the number of packets in a page
-   is an integer 512 is the largest possible packet on EHCI */
+/*
+ * MAX_TRANSFER is chosen so that the VM is not stressed by
+ * allocations > PAGE_SIZE and the number of packets in a page
+ * is an integer 512 is the largest possible packet on EHCI
+ */
 #define WRITES_IN_FLIGHT	8
 /* arbitrarily chosen */
 
@@ -54,6 +56,7 @@ struct usb_rt {
 	size_t			bulk_in_size;		/* the size of the receive buffer */
 	size_t			bulk_in_filled;		/* number of bytes in the buffer */
 	size_t			bulk_in_copied;		/* already copied to user space */
+	unsigned char	*text_api_buffer;
 	__u8			bulk_in_endpointAddr;	/* the address of the bulk in endpoint */
 	__u8			bulk_out_endpointAddr;	/* the address of the bulk out endpoint */
 	int			errors;			/* the last request tanked */
@@ -61,6 +64,7 @@ struct usb_rt {
 	spinlock_t		err_lock;		/* lock for errors */
 	struct kref		kref;
 	struct mutex		io_mutex;		/* synchronize I/O with disconnect */
+	unsigned long		disconnected:1;
 	wait_queue_head_t	bulk_in_wait;		/* to wait for an ongoing read */
 	bool 			has_text_api;
 };
@@ -73,9 +77,12 @@ static void usb_rt_delete(struct kref *kref)
 {
 	struct usb_rt *dev = to_usb_rt_dev(kref);
 
+	kfree(dev->text_api_buffer);
+	usb_free_coherent(dev->bulk_in_urb->dev, dev->bulk_in_size,
+			  dev->bulk_in_buffer, dev->bulk_in_urb->transfer_dma);
 	usb_free_urb(dev->bulk_in_urb);
+	usb_put_intf(dev->interface);
 	usb_put_dev(dev->udev);
-	kfree(dev->bulk_in_buffer);
 	kfree(dev);
 }
 
@@ -125,10 +132,7 @@ static int usb_rt_release(struct inode *inode, struct file *file)
 		return -ENODEV;
 
 	/* allow the device to be autosuspended */
-	mutex_lock(&dev->io_mutex);
-	if (dev->interface)
-		usb_autopm_put_interface(dev->interface);
-	mutex_unlock(&dev->io_mutex);
+	usb_autopm_put_interface(dev->interface);
 
 	/* decrement the count on our device */
 	kref_put(&dev->kref, usb_rt_delete);
@@ -233,19 +237,28 @@ unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 	int rv;
 
 	dev = file->private_data;
-	poll_wait(file, &dev->bulk_in_wait, wait);
-
 	
 	rv = mutex_lock_interruptible(&dev->io_mutex);
-	if (rv) {
+	if (rv < 0) {
 		return rv;
 	}
+
+	if (dev->disconnected) {		/* disconnect() was called */
+		retval = -ENODEV;
+		goto exit;
+	}
+
+	poll_wait(file, &dev->bulk_in_wait, wait);
 
 	spin_lock_irqsave(&dev->err_lock, flags);
 	ongoing_io = dev->ongoing_read;
 	spin_unlock_irqrestore(&dev->err_lock, flags);
 	if(ongoing_io) {
 		// only return default retval
+	} else if (dev->errors) {
+		dev_info(&dev->interface->dev, "poll error: %d", dev->errors);
+		retval = POLLERR;
+		goto exit;
 	} else {
 		if (dev->bulk_in_filled - dev->bulk_in_copied) {
 			// data is available
@@ -254,10 +267,13 @@ unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 			// todo else poll maybe triggers a new read
 			rv = usb_rt_do_read_io(dev, dev->bulk_in_size);
 			if (rv) {
-				return rv;
+				retval = POLLERR;
+				goto exit;
 			}
 		}
 	}
+
+exit:
 	mutex_unlock(&dev->io_mutex);
 	return retval;
 }
@@ -281,7 +297,7 @@ static ssize_t usb_rt_read(struct file *file, char *buffer, size_t count,
 	if (rv < 0)
 		return rv;
 
-	if (!dev->interface) {		/* disconnect() was called */
+	if (dev->disconnected) {		/* disconnect() was called */
 		rv = -ENODEV;
 		goto exit;
 	}
@@ -361,6 +377,7 @@ retry:
 		 * if we are asked for more than we have,
 		 * we start IO but don't wait
 		 */
+		// usb_rt only returns what it gets in one packet
 		// if (available < count)
 		// 	usb_rt_do_read_io(dev, count - chunk);
 	} else {
@@ -470,7 +487,7 @@ static ssize_t usb_rt_write(struct file *file, const char *user_buffer,
 
 	/* this lock makes sure we don't submit URBs to gone devices */
 	mutex_lock(&dev->io_mutex);
-	if (!dev->interface) {		/* disconnect() was called */
+	if (dev->disconnected) {		/* disconnect() was called */
 		mutex_unlock(&dev->io_mutex);
 		retval = -ENODEV;
 		goto error;
@@ -533,17 +550,14 @@ static ssize_t text_api_store(struct device *dev, struct device_attribute *attr,
 	int transfer_count = min(count, MAX_TRANSFER);
 	int count_sent = 0;
 	int retval;
-	char *buf2 = kmalloc(transfer_count, GFP_KERNEL);
-	if (!buf2)
-		return -ENOMEM;
 
-	memcpy(buf2, buf, transfer_count);	 // usb_bulk_msg doesn't want a pointer to const
+	memcpy(usb_rt->text_api_buffer, buf, transfer_count);	 // usb_bulk_msg doesn't want a pointer to const
 
 	/* do an immediate bulk write to the device */
 	retval = usb_bulk_msg (usb_rt->udev,
 						usb_sndbulkpipe (usb_rt->udev,
 						0x01),
-						buf2,
+						usb_rt->text_api_buffer,
 						transfer_count,
 						&count_sent, HZ*10);
 	if (retval)
@@ -562,7 +576,7 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 						usb_rcvbulkpipe (usb_rt->udev,
 						0x81),
 						buf,
-						1000,
+						MAX_TRANSFER,
 						&count_received, 100);
 	if (retval)
 		return retval;
@@ -609,7 +623,7 @@ static int usb_rt_probe(struct usb_interface *interface,
 	init_waitqueue_head(&dev->bulk_in_wait);
 
 	dev->udev = usb_get_dev(interface_to_usbdev(interface));
-	dev->interface = interface;
+	dev->interface = usb_get_intf(interface);
 
 	/* set up the endpoint information */
 	/* use only the first bulk-in and bulk-out endpoints on interface number 0
@@ -642,18 +656,25 @@ static int usb_rt_probe(struct usb_interface *interface,
 
 	dev->bulk_in_size = usb_endpoint_maxp(bulk_in);
 	dev->bulk_in_endpointAddr = bulk_in->bEndpointAddress;
-	dev->bulk_in_buffer = kmalloc(dev->bulk_in_size, GFP_KERNEL);
-	if (!dev->bulk_in_buffer) {
-		retval = -ENOMEM;
-		goto error;
-	}
 	dev->bulk_in_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!dev->bulk_in_urb) {
 		retval = -ENOMEM;
 		goto error;
 	}
-
+	dev->bulk_in_buffer = usb_alloc_coherent(dev->udev, dev->bulk_in_size, GFP_KERNEL,
+				 &dev->bulk_in_urb->transfer_dma);
+	if (!dev->bulk_in_buffer) {
+		retval = -ENOMEM;
+		goto error;
+	}
+	dev->bulk_in_urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	dev->bulk_out_endpointAddr = bulk_out->bEndpointAddress;
+
+	dev->text_api_buffer = kmalloc(MAX_TRANSFER, GFP_KERNEL);
+	if (!dev->text_api_buffer) {
+		retval = -ENOMEM;
+		goto error;
+	}
 
 	/* save our data pointer in this interface device */
 	usb_set_intfdata(interface, dev);
@@ -703,15 +724,16 @@ static void usb_rt_disconnect(struct usb_interface *interface)
 
 	/* prevent more I/O from starting */
 	mutex_lock(&dev->io_mutex);
-	dev->interface = NULL;
+	dev->disconnected = 1;
 	mutex_unlock(&dev->io_mutex);
 
+	usb_kill_urb(dev->bulk_in_urb);
 	usb_kill_anchored_urbs(&dev->submitted);
+
+	dev_info(&interface->dev, "USB RT #%d disconnected", minor);
 
 	/* decrement our usage count */
 	kref_put(&dev->kref, usb_rt_delete);
-
-	dev_info(&interface->dev, "USB RT #%d now disconnected", minor);
 }
 
 static void usb_rt_draw_down(struct usb_rt *dev)
