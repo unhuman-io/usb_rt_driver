@@ -252,6 +252,10 @@ unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 	spin_unlock_irqrestore(&dev->err_lock, flags);
 	if(ongoing_io) {
 		// only return default retval
+	} else if (dev->errors) {
+		dev_info(&dev->interface->dev, "poll error: %d", dev->errors);
+		retval = POLLERR;
+		goto exit;
 	} else {
 		if (dev->bulk_in_filled - dev->bulk_in_copied) {
 			// data is available
@@ -260,7 +264,7 @@ unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 			// todo else poll maybe triggers a new read
 			rv = usb_rt_do_read_io(dev, dev->bulk_in_size);
 			if (rv) {
-				retval = rv;
+				retval = POLLERR;
 				goto exit;
 			}
 		}
