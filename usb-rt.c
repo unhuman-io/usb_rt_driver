@@ -234,13 +234,18 @@ unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 	int rv;
 
 	dev = file->private_data;
-	poll_wait(file, &dev->bulk_in_wait, wait);
-
 	
 	rv = mutex_lock_interruptible(&dev->io_mutex);
-	if (rv) {
+	if (rv < 0) {
 		return rv;
 	}
+
+	if (dev->disconnected) {		/* disconnect() was called */
+		retval = -ENODEV;
+		goto exit;
+	}
+
+	poll_wait(file, &dev->bulk_in_wait, wait);
 
 	spin_lock_irqsave(&dev->err_lock, flags);
 	ongoing_io = dev->ongoing_read;
@@ -255,10 +260,13 @@ unsigned int usb_rt_poll(struct file *file, struct poll_table_struct *wait) {
 			// todo else poll maybe triggers a new read
 			rv = usb_rt_do_read_io(dev, dev->bulk_in_size);
 			if (rv) {
-				return rv;
+				retval = rv;
+				goto exit;
 			}
 		}
 	}
+
+exit:
 	mutex_unlock(&dev->io_mutex);
 	return retval;
 }
