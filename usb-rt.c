@@ -56,6 +56,7 @@ struct usb_rt {
 	size_t			bulk_in_size;		/* the size of the receive buffer */
 	size_t			bulk_in_filled;		/* number of bytes in the buffer */
 	size_t			bulk_in_copied;		/* already copied to user space */
+	unsigned char	*text_api_buffer;
 	__u8			bulk_in_endpointAddr;	/* the address of the bulk in endpoint */
 	__u8			bulk_out_endpointAddr;	/* the address of the bulk out endpoint */
 	int			errors;			/* the last request tanked */
@@ -76,10 +77,12 @@ static void usb_rt_delete(struct kref *kref)
 {
 	struct usb_rt *dev = to_usb_rt_dev(kref);
 
+	kfree(dev->text_api_buffer);
+	usb_free_coherent(dev->bulk_in_urb->dev, dev->bulk_in_size,
+			  dev->bulk_in_buffer, dev->bulk_in_urb->transfer_dma);
 	usb_free_urb(dev->bulk_in_urb);
 	usb_put_intf(dev->interface);
 	usb_put_dev(dev->udev);
-	kfree(dev->bulk_in_buffer);
 	kfree(dev);
 }
 
@@ -547,17 +550,14 @@ static ssize_t text_api_store(struct device *dev, struct device_attribute *attr,
 	int transfer_count = min(count, MAX_TRANSFER);
 	int count_sent = 0;
 	int retval;
-	char *buf2 = kmalloc(transfer_count, GFP_KERNEL);
-	if (!buf2)
-		return -ENOMEM;
 
-	memcpy(buf2, buf, transfer_count);	 // usb_bulk_msg doesn't want a pointer to const
+	memcpy(usb_rt->text_api_buffer, buf, transfer_count);	 // usb_bulk_msg doesn't want a pointer to const
 
 	/* do an immediate bulk write to the device */
 	retval = usb_bulk_msg (usb_rt->udev,
 						usb_sndbulkpipe (usb_rt->udev,
 						0x01),
-						buf2,
+						usb_rt->text_api_buffer,
 						transfer_count,
 						&count_sent, HZ*10);
 	if (retval)
@@ -576,7 +576,7 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 						usb_rcvbulkpipe (usb_rt->udev,
 						0x81),
 						buf,
-						1000,
+						MAX_TRANSFER,
 						&count_received, 100);
 	if (retval)
 		return retval;
@@ -656,18 +656,25 @@ static int usb_rt_probe(struct usb_interface *interface,
 
 	dev->bulk_in_size = usb_endpoint_maxp(bulk_in);
 	dev->bulk_in_endpointAddr = bulk_in->bEndpointAddress;
-	dev->bulk_in_buffer = kmalloc(dev->bulk_in_size, GFP_KERNEL);
-	if (!dev->bulk_in_buffer) {
-		retval = -ENOMEM;
-		goto error;
-	}
 	dev->bulk_in_urb = usb_alloc_urb(0, GFP_KERNEL);
 	if (!dev->bulk_in_urb) {
 		retval = -ENOMEM;
 		goto error;
 	}
-
+	dev->bulk_in_buffer = usb_alloc_coherent(dev->udev, dev->bulk_in_size, GFP_KERNEL,
+				 &dev->bulk_in_urb->transfer_dma);
+	if (!dev->bulk_in_buffer) {
+		retval = -ENOMEM;
+		goto error;
+	}
+	dev->bulk_in_urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	dev->bulk_out_endpointAddr = bulk_out->bEndpointAddress;
+
+	dev->text_api_buffer = kmalloc(MAX_TRANSFER, GFP_KERNEL);
+	if (!dev->text_api_buffer) {
+		retval = -ENOMEM;
+		goto error;
+	}
 
 	/* save our data pointer in this interface device */
 	usb_set_intfdata(interface, dev);
