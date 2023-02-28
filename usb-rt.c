@@ -42,7 +42,7 @@ MODULE_DEVICE_TABLE(usb, usb_rt_table);
  * allocations > PAGE_SIZE and the number of packets in a page
  * is an integer 512 is the largest possible packet on EHCI
  */
-#define WRITES_IN_FLIGHT	8
+#define WRITES_IN_FLIGHT	1
 /* arbitrarily chosen */
 
 /* Structure to hold all of our device specific stuff */
@@ -53,7 +53,10 @@ struct usb_rt {
 	struct usb_anchor	submitted;		/* in case we need to retract our submissions */
 	struct urb		*bulk_in_urb;		/* the urb to read data with */
 	unsigned char           *bulk_in_buffer;	/* the buffer to receive data */
+	struct urb		*bulk_out_urb;		/* the urb to write data with */
+	unsigned char           *bulk_out_buffer;	/* the buffer to write data */
 	size_t			bulk_in_size;		/* the size of the receive buffer */
+	size_t			bulk_out_size;		/* the size of the receive buffer */
 	size_t			bulk_in_filled;		/* number of bytes in the buffer */
 	size_t			bulk_in_copied;		/* already copied to user space */
 	unsigned char	*text_api_buffer;
@@ -81,6 +84,9 @@ static void usb_rt_delete(struct kref *kref)
 	usb_free_coherent(dev->bulk_in_urb->dev, dev->bulk_in_size,
 			  dev->bulk_in_buffer, dev->bulk_in_urb->transfer_dma);
 	usb_free_urb(dev->bulk_in_urb);
+	usb_free_coherent(dev->bulk_out_urb->dev, dev->bulk_out_size,
+			  dev->bulk_out_buffer, dev->bulk_out_urb->transfer_dma);
+	usb_free_urb(dev->bulk_out_urb);
 	usb_put_intf(dev->interface);
 	usb_put_dev(dev->udev);
 	kfree(dev);
@@ -414,23 +420,18 @@ static void usb_rt_write_bulk_callback(struct urb *urb)
 		spin_unlock_irqrestore(&dev->err_lock, flags);
 	}
 
-	/* free up our allocated buffer */
-	usb_free_coherent(urb->dev, urb->transfer_buffer_length,
-			  urb->transfer_buffer, urb->transfer_dma);
 	up(&dev->limit_sem);
 }
 
 static ssize_t usb_rt_write(struct file *file, const char *user_buffer,
 			  size_t count, loff_t *ppos)
 {
-	struct usb_rt *dev;
+	struct usb_rt *dev = file->private_data;
 	int retval = 0;
 	struct urb *urb = NULL;
 	char *buf = NULL;
 	unsigned long flags;
-	size_t writesize = min(count, (size_t)MAX_TRANSFER);
-
-	dev = file->private_data;
+	size_t writesize = min(count, (size_t)dev->bulk_out_size);
 
 	//dev_info(&dev->interface->dev, "count write: %ld", count);
 
@@ -466,21 +467,7 @@ static ssize_t usb_rt_write(struct file *file, const char *user_buffer,
 	if (retval < 0)
 		goto error;
 
-	/* create a urb, and a buffer for it, and copy the data to the urb */
-	urb = usb_alloc_urb(0, GFP_KERNEL);
-	if (!urb) {
-		retval = -ENOMEM;
-		goto error;
-	}
-
-	buf = usb_alloc_coherent(dev->udev, writesize, GFP_KERNEL,
-				 &urb->transfer_dma);
-	if (!buf) {
-		retval = -ENOMEM;
-		goto error;
-	}
-
-	if (copy_from_user(buf, user_buffer, writesize)) {
+	if (copy_from_user(dev->bulk_out_buffer, user_buffer, writesize)) {
 		retval = -EFAULT;
 		goto error;
 	}
@@ -494,14 +481,14 @@ static ssize_t usb_rt_write(struct file *file, const char *user_buffer,
 	}
 
 	/* initialize the urb properly */
-	usb_fill_bulk_urb(urb, dev->udev,
+	usb_fill_bulk_urb(dev->bulk_out_urb, dev->udev,
 			  usb_sndbulkpipe(dev->udev, dev->bulk_out_endpointAddr),
-			  buf, writesize, usb_rt_write_bulk_callback, dev);
-	urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
-	usb_anchor_urb(urb, &dev->submitted);
+			  dev->bulk_out_buffer, writesize, usb_rt_write_bulk_callback, dev);
+	dev->bulk_out_urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
+	usb_anchor_urb(dev->bulk_out_urb, &dev->submitted);
 
 	/* send the data out the bulk port */
-	retval = usb_submit_urb(urb, GFP_KERNEL);
+	retval = usb_submit_urb(dev->bulk_out_urb, GFP_KERNEL);
 	mutex_unlock(&dev->io_mutex);
 	if (retval) {
 		dev_err(&dev->interface->dev,
@@ -509,13 +496,6 @@ static ssize_t usb_rt_write(struct file *file, const char *user_buffer,
 			__func__, retval);
 		goto error_unanchor;
 	}
-
-	/*
-	 * release our reference to this urb, the USB core will eventually free
-	 * it entirely
-	 */
-	usb_free_urb(urb);
-
 
 	return writesize;
 
@@ -669,6 +649,20 @@ static int usb_rt_probe(struct usb_interface *interface,
 	}
 	dev->bulk_in_urb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	dev->bulk_out_endpointAddr = bulk_out->bEndpointAddress;
+	
+	dev->bulk_in_size = usb_endpoint_maxp(bulk_out);
+	dev->bulk_out_urb = usb_alloc_urb(0, GFP_KERNEL);
+	if (!dev->bulk_out_urb) {
+		retval = -ENOMEM;
+		goto error;
+	}
+	dev->bulk_out_buffer = usb_alloc_coherent(dev->udev, dev->bulk_out_size, GFP_KERNEL,
+				 &dev->bulk_out_urb->transfer_dma);
+	if (!dev->bulk_out_buffer) {
+		retval = -ENOMEM;
+		goto error;
+	}
+
 
 	dev->text_api_buffer = kmalloc(MAX_TRANSFER, GFP_KERNEL);
 	if (!dev->text_api_buffer) {
