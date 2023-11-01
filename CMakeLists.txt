@@ -44,4 +44,7 @@ configure_file(dkms.conf.in dkms.conf)
 
 install(FILES usb-rt.c Kbuild 
         ${CMAKE_BINARY_DIR}/usb_rt_version.h
+        uapi_usb_rt.h
         ${CMAKE_CURRENT_BINARY_DIR}/dkms.conf DESTINATION /usr/src/usb_rt-${VERSION})
+
+install(FILES uapi_usb_rt.h DESTINATION /usr/include)

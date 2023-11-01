@@ -18,6 +18,7 @@
 #include <linux/mutex.h>
 #include <linux/poll.h>
 #include "usb_rt_version.h"
+#include "uapi_usb_rt.h"
 
 MODULE_VERSION(USB_RT_VERSION_STRING);
 /* Define these values to match your devices */
@@ -533,6 +534,58 @@ exit:
 	return retval;
 }
 
+static long int usb_rt_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	struct usb_rt *dev;
+	int retval = 0;
+
+	dev = file->private_data;
+	switch (cmd) {
+		case USBRT_TIMEOUT_MS:
+			unsigned int tmp;
+			retval = get_user(tmp, (unsigned int __user *) arg);
+
+			if (retval == 0) {
+				if (tmp == 0) {
+					retval = put_user(dev->timeout_ms, (unsigned int __user *) arg);
+				} else {
+					dev->timeout_ms = tmp;
+				}
+			}			
+			printk("usb timeout %d\n", dev->timeout_ms);
+			break;
+		default:
+			retval = -ENOTTY;
+			break;
+	}
+
+	return retval;
+}
+
+// example ioctl interaction
+
+// #include <uapi_usb_rt.h>
+
+// void Motor::set_timeout_ms(int timeout_ms) {
+//     //std::string timeout_path = attr_path + "/timeout_ms";
+//     unsigned int timeout = timeout_ms;
+//     int retval = ::ioctl(fd_, USBRT_TIMEOUT_MS, &timeout);
+//     if (retval < 0) {
+//         throw std::runtime_error("set timeout error " + std::to_string(errno) + ": " + strerror(errno));
+//     }
+// }
+
+// int Motor::get_timeout_ms() const {
+//     unsigned int timeout = 0;
+//     int retval = ::ioctl(fd_, USBRT_TIMEOUT_MS, &timeout);
+//     if (retval < 0) {
+//         throw std::runtime_error("get timeout error " + std::to_string(errno) + ": " + strerror(errno));
+//     }
+//     return timeout;
+// }
+
+
+
 static const struct file_operations usb_rt_fops = {
 	.owner =	THIS_MODULE,
 	.read =		usb_rt_read,
@@ -542,6 +595,7 @@ static const struct file_operations usb_rt_fops = {
 	.flush =	usb_rt_flush,
 	.llseek =	noop_llseek,
 	.poll = 	usb_rt_poll,
+	.unlocked_ioctl = usb_rt_ioctl,
 };
 
 static ssize_t text_api_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)		
