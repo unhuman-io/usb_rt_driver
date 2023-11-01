@@ -586,6 +586,22 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 }
 struct device_attribute dev_attr_text_api = __ATTR_RW(text_api);
 
+static ssize_t timeout_ms_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)		
+{
+	struct usb_interface *intf = to_usb_interface(dev);		
+	struct usb_rt *usb_rt = usb_get_intfdata(intf);
+	sscanf(buf, "%d", &usb_rt->timeout_ms);
+	return count;	
+}
+
+static ssize_t timeout_ms_show(struct device *dev, struct device_attribute *attr, char *buf)		
+{
+	struct usb_interface *intf = to_usb_interface(dev);		
+	struct usb_rt *usb_rt = usb_get_intfdata(intf);	
+	return sysfs_emit(buf, "%d\n", usb_rt->timeout_ms);	
+}
+struct device_attribute dev_attr_timeout_ms = __ATTR_RW(timeout_ms);
+
 /*
  * usb class driver info in order to get a minor number from the usb core,
  * and to have the device registered with the driver core
@@ -644,6 +660,9 @@ static int usb_rt_probe(struct usb_interface *interface,
 			// text api interface
 			retval = device_create_file(&interface->dev, &dev_attr_text_api);
 			dev->has_text_api = true;
+			if (retval)
+				goto error;
+			retval = device_create_file(&interface->dev, &dev_attr_timeout_ms);
 			if (retval)
 				goto error;
 		}
@@ -719,6 +738,7 @@ static void usb_rt_disconnect(struct usb_interface *interface)
 	dev = usb_get_intfdata(interface);
 	if (dev->has_text_api == true)
 		device_remove_file(&interface->dev, &dev_attr_text_api);
+	device_remove_file(&interface->dev, &dev_attr_timeout_ms);
 	usb_set_intfdata(interface, NULL);
 
 	/* give back our minor */
