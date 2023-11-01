@@ -67,6 +67,7 @@ struct usb_rt {
 	unsigned long		disconnected:1;
 	wait_queue_head_t	bulk_in_wait;		/* to wait for an ongoing read */
 	bool 			has_text_api;
+	unsigned int	timeout_ms;
 };
 #define to_usb_rt_dev(d) container_of(d, struct usb_rt, kref)
 
@@ -318,7 +319,7 @@ retry:
 		 * IO may take forever
 		 * hence wait in an interruptible state
 		 */
-		rv = wait_event_interruptible_timeout(dev->bulk_in_wait, (!dev->ongoing_read), msecs_to_jiffies(10));
+		rv = wait_event_interruptible_timeout(dev->bulk_in_wait, (!dev->ongoing_read), msecs_to_jiffies(dev->timeout_ms));
 		if (rv <= 0) {
 			if (rv == 0) {
 				rv = -ETIMEDOUT;
@@ -559,7 +560,7 @@ static ssize_t text_api_store(struct device *dev, struct device_attribute *attr,
 						0x01),
 						usb_rt->text_api_buffer,
 						transfer_count,
-						&count_sent, HZ*10);
+						&count_sent, usb_rt->timeout_ms);
 	if (retval)
 		return retval;
 	else
@@ -577,7 +578,7 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 						0x81),
 						buf,
 						MAX_TRANSFER,
-						&count_received, 100);
+						&count_received, usb_rt->timeout_ms);
 	if (retval)
 		return retval;
 	else
@@ -624,6 +625,7 @@ static int usb_rt_probe(struct usb_interface *interface,
 
 	dev->udev = usb_get_dev(interface_to_usbdev(interface));
 	dev->interface = usb_get_intf(interface);
+	dev->timeout_ms = 10;
 
 	/* set up the endpoint information */
 	/* use only the first bulk-in and bulk-out endpoints on interface number 0
