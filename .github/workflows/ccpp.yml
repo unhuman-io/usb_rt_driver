@@ -4,7 +4,7 @@ on: [push]
 
 jobs:
   build:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v1
     - name: cmake
@@ -19,7 +19,7 @@ jobs:
         name: packages
         path: packages
   build_arm:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -30,9 +30,12 @@ jobs:
           - arch: armv6
             distro: buster
             headers: raspberrypi-kernel-headers
+          - arch: armv7
+            distro: buster
+            headers: linux-headers-armmp
     steps:
     - uses: actions/checkout@v1
-    - uses: uraimo/run-on-arch-action@v2.0.5
+    - uses: uraimo/run-on-arch-action@master
       name: Run commands
       id: runcmd
       with:
@@ -50,7 +53,7 @@ jobs:
         install: |
           apt-get update -q -y
           apt-get install -y cmake build-essential ${{ matrix.headers }}
-          if [ ${{ matrix.arch }} = "armv6" ]; then
+          if [ ${{ matrix.distro }} = "buster" ]; then
             # cmake 3.16 has problems
             apt-get remove -y cmake-data
             apt-get install -y cmake-data=3.13.4-1 cmake=3.13.4-1
