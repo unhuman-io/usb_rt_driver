@@ -581,8 +581,31 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 						&count_received, usb_rt->timeout_ms);
 	if (retval)
 		return retval;
-	else
-		return count_received;		
+	
+	if (count_received > 1) {
+		if (buf[0] == 0) {
+			// a control packet
+			if (buf[1] == 1) {
+				// timeout request
+				if (count_received == 8) {
+					// timeout request
+					// retriggers the read with the new timeout
+					__u32 timeout_us = 0;
+					timeout_us = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
+					// dev_info(&intf->dev, "timeout request: %d\n", timeout_us);
+					retval = usb_bulk_msg (usb_rt->udev,
+									usb_rcvbulkpipe (usb_rt->udev,
+									0x81),
+									buf,
+									MAX_TRANSFER,
+									&count_received, timeout_us/1000);
+					if (retval)
+						return retval;
+				}
+			}
+		}
+	} // else always fall back to just returning the data
+	return count_received;
 }
 struct device_attribute dev_attr_text_api = __ATTR_RW(text_api);
 
