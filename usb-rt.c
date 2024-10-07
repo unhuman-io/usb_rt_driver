@@ -598,9 +598,34 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 									0x81),
 									buf,
 									MAX_TRANSFER,
-									&count_received, timeout_us/1000);
+									&count_received, timeout_us/1000 + usb_rt->timeout_ms);
 					if (retval)
 						return retval;
+				}
+			} else if (buf[1] == 2) {
+				// long packet
+				uint16_t total_length = buf[2] | (buf[3] << 8);
+				uint16_t packet_number = buf[4] | (buf[5] << 8);
+				if (total_length > PAGE_SIZE) {
+					// too long
+					return -EINVAL;
+				}
+				const uint8_t header_size = 8;
+				uint16_t total_count_received = count_received - header_size;
+				memcpy(buf, buf + header_size, total_count_received);
+				while (total_length > total_count_received) {
+					// assemble multiple packets
+					retval = usb_bulk_msg (usb_rt->udev,
+						usb_rcvbulkpipe (usb_rt->udev,
+						0x81),
+						buf+total_count_received,
+						MAX_TRANSFER,
+						&count_received, usb_rt->timeout_ms);
+					if (retval)
+						return retval;
+					total_count_received += count_received - header_size;
+					memcpy(buf+total_count_received, buf+total_count_received+header_size, count_received-header_size);
+					// ignoring packet_number
 				}
 			}
 		}
