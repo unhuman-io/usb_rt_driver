@@ -590,7 +590,7 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 				if (count_received == 8) {
 					// timeout request
 					// retriggers the read with the new timeout
-					__u32 timeout_us = 0;
+					uint32_t timeout_us = 0;
 					timeout_us = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
 					// dev_info(&intf->dev, "timeout request: %d\n", timeout_us);
 					retval = usb_bulk_msg (usb_rt->udev,
@@ -604,14 +604,15 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 				}
 			} else if (buf[1] == 2) {
 				// long packet
-				uint16_t total_length = buf[2] | (buf[3] << 8);
-				uint16_t packet_number = buf[4] | (buf[5] << 8);
-				if (total_length > PAGE_SIZE) {
+				uint16_t total_length = buf[4] | (buf[5] << 8);
+				uint16_t packet_number = buf[6] | (buf[7] << 8);
+				const uint8_t header_size = 8;
+				uint16_t total_count_received = count_received - header_size;
+				if (total_length > PAGE_SIZE - header_size) {
 					// too long
 					return -EINVAL;
 				}
-				const uint8_t header_size = 8;
-				uint16_t total_count_received = count_received - header_size;
+				// dev_info(&intf->dev, "long packet: %d %d %d\n", total_length, packet_number, total_count_received);
 				memcpy(buf, buf + header_size, total_count_received);
 				while (total_length > total_count_received) {
 					// assemble multiple packets
@@ -627,6 +628,7 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 					memcpy(buf+total_count_received, buf+total_count_received+header_size, count_received-header_size);
 					// ignoring packet_number
 				}
+				count_received = total_count_received;
 			}
 		}
 	} // else always fall back to just returning the data
