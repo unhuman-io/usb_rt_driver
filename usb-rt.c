@@ -581,8 +581,60 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 						&count_received, usb_rt->timeout_ms);
 	if (retval)
 		return retval;
-	else
-		return count_received;		
+	
+	if (count_received > 1) {
+		if (buf[0] == 0) {
+			// a control packet
+			if (buf[1] == 1) {
+				// timeout request
+				if (count_received == 8) {
+					// timeout request
+					// retriggers the read with the new timeout
+					uint32_t timeout_us = 0;
+					timeout_us = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
+					// dev_info(&intf->dev, "timeout request: %d\n", timeout_us);
+					retval = usb_bulk_msg (usb_rt->udev,
+									usb_rcvbulkpipe (usb_rt->udev,
+									0x81),
+									buf,
+									MAX_TRANSFER,
+									&count_received, timeout_us/1000 + usb_rt->timeout_ms);
+					if (retval)
+						return retval;
+				}
+			} else if (buf[1] == 2) {
+				// long packet
+				uint16_t total_length = buf[4] | (buf[5] << 8);
+				uint16_t packet_number = buf[6] | (buf[7] << 8);
+				const uint8_t header_size = 8;
+				uint16_t total_count_received = count_received - header_size;
+				if (total_length > PAGE_SIZE - header_size) {
+					// too long
+					return -EINVAL;
+				}
+				// dev_info(&intf->dev, "long packet: %d %d %d\n", total_length, packet_number, total_count_received);
+				memcpy(buf, buf + header_size, total_count_received);
+				while (total_length > total_count_received) {
+					// assemble multiple packets
+					char * new_buf = buf+total_count_received;
+					retval = usb_bulk_msg (usb_rt->udev,
+						usb_rcvbulkpipe (usb_rt->udev,
+						0x81),
+						new_buf,
+						MAX_TRANSFER,
+						&count_received, usb_rt->timeout_ms);
+					if (retval)
+						return retval;
+					total_count_received += count_received - header_size;
+					// dev_info(&intf->dev, "long packet2: %d %d %d\n", total_length, count_received, total_count_received);
+					memcpy(new_buf, new_buf+header_size, count_received-header_size);
+					// ignoring packet_number
+				}
+				count_received = total_count_received;
+			}
+		}
+	} // else always fall back to just returning the data
+	return count_received;
 }
 struct device_attribute dev_attr_text_api = __ATTR_RW(text_api);
 
