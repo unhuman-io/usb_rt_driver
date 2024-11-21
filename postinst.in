@@ -1,8 +1,10 @@
 #!/bin/bash
 
 echo "Post install depmod and udev reload rules"
+rmmod usb_rt -s || true
 dkms add -m usb_rt -v ${VERSION}
 dkms build -m usb_rt -v ${VERSION}
 dkms install -m usb_rt -v ${VERSION}
 depmod
 udevadm control --reload-rules
+modprobe usb_rt

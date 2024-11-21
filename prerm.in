@@ -1,3 +1,4 @@
 #!/bin/bash
 
 dkms remove -m usb_rt -v ${VERSION} --all
+rmmod usb_rt -s || true
