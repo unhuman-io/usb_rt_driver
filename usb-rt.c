@@ -613,7 +613,7 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 					return -EINVAL;
 				}
 				// dev_info(&intf->dev, "long packet: %d %d %d\n", total_length, packet_number, total_count_received);
-				memcpy(buf, buf + header_size, total_count_received);
+				memmove(buf, buf + header_size, total_count_received);
 				while (total_length > total_count_received) {
 					// assemble multiple packets
 					char * new_buf = buf+total_count_received;
@@ -627,7 +627,7 @@ static ssize_t text_api_show(struct device *dev, struct device_attribute *attr, 
 						return retval;
 					total_count_received += count_received - header_size;
 					// dev_info(&intf->dev, "long packet2: %d %d %d\n", total_length, count_received, total_count_received);
-					memcpy(new_buf, new_buf+header_size, count_received-header_size);
+					memmove(new_buf, new_buf+header_size, count_received-header_size);
 					// ignoring packet_number
 				}
 				count_received = total_count_received;
