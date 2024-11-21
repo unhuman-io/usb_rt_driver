@@ -14,7 +14,7 @@ jobs:
     - name: make package
       run: make package
     - name: Archive production artifacts
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v4
       with:
         name: packages
         path: packages
@@ -59,7 +59,7 @@ jobs:
             apt-get install -y cmake-data=3.13.4-1 cmake=3.13.4-1
           fi
     - name: Archive production artifacts
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v4
       with:
         name: packages
         path: packages
