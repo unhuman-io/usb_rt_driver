@@ -17,6 +17,15 @@
 #include <linux/usb.h>
 #include <linux/mutex.h>
 #include <linux/poll.h>
+#include <linux/version.h>
+
+/*
+ * sysfs_emit() appeared in Linux 5.10. Older kernels are still in use on boards this
+ * driver is for (NVIDIA L4T R32 on the Jetson Nano is 4.9).
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)
+#define sysfs_emit(buf, ...) scnprintf(buf, PAGE_SIZE, __VA_ARGS__)
+#endif
 #include "usb_rt_version.h"
 
 MODULE_VERSION(USB_RT_VERSION_STRING);
